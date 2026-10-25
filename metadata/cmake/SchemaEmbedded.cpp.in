@@ -1,0 +1,6 @@
+// GENERATED from sql/schema.sql by CMake. Do not edit.
+namespace pandora::metadata {
+const char* embeddedSchemaSql() {
+    return R"PANDORASQL(@PANDORA_SCHEMA_SQL@)PANDORASQL";
+}
+}  // namespace pandora::metadata
