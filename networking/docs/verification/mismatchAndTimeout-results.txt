@@ -1,0 +1,10 @@
+********* Start testing of Tests *********
+Config: Using QtTest library 6.11.2, Qt 6.11.2 (x86_64-little_endian-llp64 shared (dynamic) release build; by GCC 13.1.0), windows 11
+PASS   : Tests::initTestCase()
+FAIL!  : Tests::mismatchAndTimeout() Compared values are not the same
+   Actual   (silent.state())                 : UnconnectedState
+   Expected (QAbstractSocket::ConnectedState): ConnectedState
+C:/Pandora_2/tests/network_tests.cpp(95) : failure location
+PASS   : Tests::cleanupTestCase()
+Totals: 2 passed, 1 failed, 0 skipped, 0 blacklisted, 18617ms
+********* Finished testing of Tests *********
