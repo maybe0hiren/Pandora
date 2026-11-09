@@ -29,10 +29,18 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
+      - name: Run Automated Distributed Tests
+        shell: pwsh
+        run: |
+          $env:Path = "$env:QT_ROOT_DIR/bin;$env:Path"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          ./build/Release/PandoraTests.exe
+
       - name: Assemble portable folder
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
           $exe = Join-Path $PWD 'build/Release/Pandora.exe'
           if (!(Test-Path $exe)) { throw "Build did not produce $exe" }
           $out = Join-Path $PWD 'Pandora-Portable'
@@ -42,16 +50,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
           Copy-Item README.md $out/README.txt
           New-Item -ItemType Directory -Force -Path "$out/LICENSES" | Out-Null
-          @'
-          Pandora Portable - prototype
-
-          Run Pandora.exe. Qt does not need to be installed on the target computer.
-          Windows may ask you to allow local-network communication through Windows Firewall.
-
-          IMPORTANT: This is an educational prototype, not production cloud storage.
-          Do not store sensitive data in it. Distributed replication, secure peer joining,
-          remote retrieval, and full self-healing are not yet complete.
-          '@ | Set-Content -Encoding UTF8 "$out/README.txt"
           Compress-Archive -Path "$out/*" -DestinationPath 'Pandora-Portable-Windows-x64.zip' -Force
 
       - name: Upload portable ZIP

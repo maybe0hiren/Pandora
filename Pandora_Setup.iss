@@ -3,7 +3,7 @@
 ; Then compile this file with Inno Setup 6.
 
 #define MyAppName "Pandora"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "Pandora Project"
 #define DistDir "dist\Pandora-Portable"
 

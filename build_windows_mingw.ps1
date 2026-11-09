@@ -22,7 +22,18 @@ foreach ($path in @($cmake, $gpp, $gcc, $make, $qtConfig)) {
 
 $env:Path = "$(Join-Path $env:QT_ROOT 'bin');$(Join-Path $env:MINGW_ROOT 'bin');$(Join-Path $env:CMAKE_ROOT 'bin');$env:Path"
 
-& $cmake -S $PSScriptRoot -B (Join-Path $PSScriptRoot 'build-mingw') -G 'MinGW Makefiles' `
+$buildDir = Join-Path $PSScriptRoot 'build-mingw'
+$cacheFile = Join-Path $buildDir 'CMakeCache.txt'
+if (Test-Path $cacheFile) {
+    $cacheText = Get-Content $cacheFile -Raw
+    $expectedPath = ($PSScriptRoot -replace '\\', '/')
+    if ($cacheText -notmatch [regex]::Escape($expectedPath)) {
+        Write-Host "Cleaning stale CMake cache from a previous folder location..." -ForegroundColor Yellow
+        Remove-Item $buildDir -Recurse -Force
+    }
+}
+
+& $cmake -S $PSScriptRoot -B $buildDir -G 'MinGW Makefiles' `
     "-DCMAKE_MAKE_PROGRAM=$make" `
     "-DCMAKE_C_COMPILER=$gcc" `
     "-DCMAKE_CXX_COMPILER=$gpp" `

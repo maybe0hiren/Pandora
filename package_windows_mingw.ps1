@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 
 if (-not $env:QT_ROOT)    { $env:QT_ROOT = 'C:\Qt\6.12.0\mingw_64' }
 if (-not $env:MINGW_ROOT) { $env:MINGW_ROOT = 'C:\Qt\Tools\mingw1310_64' }
@@ -26,19 +27,20 @@ foreach ($dll in $runtimeDlls) {
 }
 
 @'
-Pandora - Portable Windows x64 package
+Pandora - Portable Windows x64 Release (v1.0.0)
 
 Run Pandora.exe. Qt and MinGW do not need to be installed on this PC.
 Allow Pandora through Windows Defender Firewall on private networks when prompted.
 
-IMPORTANT: This package currently contains the Pandora proof-of-concept application.
-It is NOT yet a complete distributed storage product. Cross-node replication,
-secure authenticated joining, remote file retrieval, Guardian consensus and
-automatic replica repair are not fully implemented. Do not store important or
-sensitive files in this build.
+Included Features:
+- Authenticated Peer Joining (PBKDF2-HMAC-SHA256 + Challenge-Response)
+- Encrypted Peer Mesh Transport (AEAD + Replay Protection)
+- Automatic Multi-Node File & Folder Replication with SHA-256 Verification
+- Remote File Retrieval & Automatic Self-Healing on Peer Disconnect
+- Deterministic Guardian Failover Election & 2-Minute Shutdown Countdown
+- Ephemeral Session Storage with Crash Orphan Cleanup & Zero-Fill Wipe
 
-Supported target: Windows 11 x64. This package has to be tested on a clean
-Windows 11 computer before it can be called a verified portable release.
+Supported target: Windows 10 / 11 x64.
 '@ | Set-Content -Encoding UTF8 (Join-Path $out 'README.txt')
 
 $zip = Join-Path $PSScriptRoot 'dist\Pandora-Portable-Windows-x64.zip'

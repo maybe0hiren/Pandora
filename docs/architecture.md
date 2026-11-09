@@ -1,38 +1,22 @@
-# Pandora architecture notes
+# Pandora Production Architecture
 
-## Class responsibilities
+## Module Responsibilities
 
-- `MainWindow`: Qt Widgets UI and input validation presentation.
-- `PandoraController`: use-case orchestration; no UI widget access.
-- `PeerNode`: UDP discovery, TCP socket lifecycle, newline-framed JSON.
-- `MetadataStore`: thread-safe in-memory nodes/files/session metadata.
-- `StorageManager`: streaming local replica storage in a temporary directory.
-- `SessionSecurity`: key verifier/salt helper; demonstration only.
-- `EventBus`: in-process event dispatch.
-
-## Class diagram
-
-```mermaid
-classDiagram
-  class MainWindow
-  class PandoraController
-  class PeerNode
-  class MetadataStore
-  class StorageManager
-  class SessionSecurity
-  class EventBus
-  MainWindow --> PandoraController
-  PandoraController --> PeerNode
-  PandoraController --> MetadataStore
-  PandoraController --> StorageManager
-  PandoraController --> SessionSecurity
-  PandoraController --> EventBus
-```
-
-## Key distributed-system design constraints
-
-A real P2P system cannot assume a broadcast is delivered exactly once or that every node remains connected. Events must be versioned, bounded, authenticated, deduplicated, and replayable. A replicated metadata model needs an explicit convergence strategy. Last-write-wins timestamps alone are vulnerable to clock skew; UUID tie-breaking only resolves equal timestamps, not concurrent operations in a principled way.
-
-Leader election should be treated as a coordination protocol, not simply random local selection: two partitions can elect different Guardians. If the project deliberately tolerates temporary split-brain, document the consistency trade-off and reconcile after merge. Otherwise, use a consensus protocol or a carefully scoped single-writer lease.
-
-Replica repair must distinguish temporary disconnects from permanent departure. Replicas should be copied and checksum-verified before metadata claims the new replica exists. On shutdown, every node needs an authenticated, idempotent deactivation event and a local cleanup guarantee.
+- **`MainWindow` (`include/ui/main_window.h`, `src/ui/main_window.cpp`)**:
+  - Tabbed desktop interface for **Create Pandora**, **Join Pandora (LAN)**, and **Settings & Quotas**.
+  - Real-time distributed file catalog showing file sizes, replica counts (`local`/`remote`), versions, and SHA-256 prefixes.
+  - Real-time connected Na'vi peer table with role badges (`Guardian` vs. `Na'vi Peer`), network endpoints, storage quota usage, and free disk capacity.
+  - **Upload File**, **Upload Folder**, **Download Selected**, **Download All**, **Delete Selected**, and **Guardian 2-Min Shutdown Countdown** banner.
+- **`PandoraController` (`include/core/pandora_controller.h`, `src/core/pandora_controller.cpp`)**:
+  - Orchestrates session lifecycle, challenge-response authentication, full peer mesh formation, chunked file replication, remote file pulls, periodic replica health audits, automatic self-healing, deterministic Guardian failover, and coordinated shutdown countdowns.
+- **`PeerNode` (`include/network/peer_node.h`, `src/network/peer_node.cpp`)**:
+  - Manages UDP multi-interface LAN broadcasts and persistent bidirectional TCP connections (`connections_` and `nodeSockets_`).
+  - Enforces 8 MiB maximum frame size, heartbeat timeouts, and transparent AEAD encryption/decryption with replay protection.
+- **`MetadataStore` (`include/metadata/metadata_store.h`, `src/metadata/metadata_store.cpp`)**:
+  - Thread-safe (`QMutex`) store backed by a per-session SQLite WAL database (`metadata.sqlite`).
+  - Implements version-vector causality comparison, deterministic conflict preservation (auto-renaming concurrent same-name uploads), tombstone protection against deleted-file resurrection, event deduplication (`seenEvents_`), and deterministic Guardian election (`electDeterministicGuardian`).
+- **`StorageManager` (`include/storage/storage_manager.h`, `src/storage/storage_manager.cpp`)**:
+  - Manages the per-session temporary directory (`<Temp>/pandora-<UUID>`) with `.session.pid` process lockfiles for automatic crash-orphan cleanup on startup.
+  - Performs atomic `.part` -> `.blob` writes, single-pass SHA-256 streaming, 256 KiB chunked network I/O, quota and free-disk enforcement, path-traversal sanitization, and zero-fill file erasure on deletion/deactivation.
+- **`SessionSecurity` (`include/security/session_security.h`, `src/security/session_security.cpp`)**:
+  - Provides 60,000-round PBKDF2-HMAC-SHA256 key derivation, HMAC challenge-response proofs, constant-time equality checks, and Encrypt-then-MAC AEAD JSON sealing.

@@ -1,22 +1,28 @@
+# =============================================================================
+# Pandora — Git Ignore Configuration
+# =============================================================================
 
-# Build directories
+# CMake & Out-of-Source Build Directories
 build/
 build-*/
 cmake-build-*/
 out/
 Debug/
 Release/
-
-# CMake
+x64/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
 build.ninja
+.ninja_deps
+.ninja_log
 Testing/
+CTestTestfile.cmake
 compile_commands.json
+*_autogen/
 
-# Compiled binaries
+# Compiled Binaries, Libraries & Debug Symbols
 *.exe
 *.dll
 *.obj
@@ -25,36 +31,48 @@ compile_commands.json
 *.lib
 *.pdb
 *.ilk
+*.exp
 *.so
 *.dylib
 
-# Qt generated files
+# Qt Generated & IDE Files
 moc_*.cpp
 moc_*.h
 ui_*.h
 qrc_*.cpp
+*.moc
 *.pro.user
+*.pro.user.*
+.qt/
 .qtcreator/
+.qtc_clangd/
 
-# IDE files
+# Editor & IDE Workspaces
 .vs/
 .idea/
+.vscode/
 *.suo
 *.user
 *.VC.db
-.vscode/
+*.VC.VC.opendb
+*.code-workspace
 
-# Distribution and packaging
+# Distribution, Packaging & Installer Outputs
 dist/
 release/
 artifacts/
 Pandora-Portable/
+Pandora_Engineering_Build_Package/
 *.zip
 *.7z
 *.rar
 *.msi
+*.iss.user
 
-# Runtime data
+# Legacy Duplicate Docs
+README copy.md
+
+# Runtime Storage, SQLite Databases & Session Lockfiles
 data/
 runtime/
 storage/
@@ -63,14 +81,32 @@ tmp/
 cache/
 logs/
 backups/
+pandora-*/
+replica-cache/
+transfer-cache/
+*.blob
+*.part
+*.pandora_tmp
+.session.pid
 *.db
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
 *.log
 *.pid
 *.lock
 
-# Secrets and credentials
+# Test & Coverage Artifacts
+test_out.txt
+test-results/
+coverage/
+htmlcov/
+*.gcda
+*.gcno
+*.gcov
+
+# Secrets, Keys & Credentials
 .env
 .env.*
 !.env.example
@@ -87,12 +123,17 @@ token.json
 credentials.json
 client_secret*.json
 
-# OS files
+# Third-Party Package Managers
+vcpkg_installed/
+conan-cache/
+node_modules/
+.venv/
+venv/
+
+# OS Metadata & Temporary Backup Files
 .DS_Store
 Thumbs.db
 Desktop.ini
-
-# Temporary files
 *.tmp
 *.temp
 *.bak
@@ -102,25 +143,9 @@ Desktop.ini
 *.swo
 *~
 
-# Test and coverage output
-test-results/
-coverage/
-htmlcov/
-.pytest_cache/
-__pycache__/
-
-# Dependencies and generated third-party builds
-node_modules/
-.venv/
-venv/
-vcpkg_installed/
-conan-cache/
-
-# Pandora local state
+# Pandora Local State Overrides
 pandora.local.*
 session.local*
 peer.local.*
 node.local.*
 identity.local*
-replica-cache/
-transfer-cache/
