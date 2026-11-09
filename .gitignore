@@ -1,4 +1,126 @@
+
+# Build directories
 build/
-.vscode/
+build-*/
+cmake-build-*/
+out/
+Debug/
+Release/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+build.ninja
+Testing/
+compile_commands.json
+
+# Compiled binaries
 *.exe
+*.dll
+*.obj
+*.o
+*.a
+*.lib
+*.pdb
+*.ilk
+*.so
+*.dylib
+
+# Qt generated files
+moc_*.cpp
+moc_*.h
+ui_*.h
+qrc_*.cpp
+*.pro.user
+.qtcreator/
+
+# IDE files
+.vs/
+.idea/
+*.suo
 *.user
+*.VC.db
+.vscode/
+
+# Distribution and packaging
+dist/
+release/
+artifacts/
+Pandora-Portable/
+*.zip
+*.7z
+*.rar
+*.msi
+
+# Runtime data
+data/
+runtime/
+storage/
+temp/
+tmp/
+cache/
+logs/
+backups/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.pid
+*.lock
+
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+id_rsa
+id_ed25519
+token.json
+credentials.json
+client_secret*.json
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.swp
+*.swo
+*~
+
+# Test and coverage output
+test-results/
+coverage/
+htmlcov/
+.pytest_cache/
+__pycache__/
+
+# Dependencies and generated third-party builds
+node_modules/
+.venv/
+venv/
+vcpkg_installed/
+conan-cache/
+
+# Pandora local state
+pandora.local.*
+session.local*
+peer.local.*
+node.local.*
+identity.local*
+replica-cache/
+transfer-cache/
