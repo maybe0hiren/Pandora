@@ -105,7 +105,7 @@ bool PandoraController::createPandora(const QString& name, const QString& user, 
         return false;
     }
     if (name.trimmed().isEmpty() || user.trimmed().isEmpty() || key.size() < 6) {
-        if (error) *error = "Enter a Pandora name, your Na'vi name, and a Pandora Key of at least 6 characters.";
+        if (error) *error = "Enter a Pandora name, your peer name, and a Pandora Key of at least 6 characters.";
         return false;
     }
     if (!storage_.initialize()) {
@@ -181,7 +181,7 @@ bool PandoraController::joinPandora(const QString& user, const QString& key, con
         return false;
     }
     if (user.trimmed().isEmpty() || key.size() < 6) {
-        if (error) *error = "Enter your Na'vi name and a Pandora Key (6+ characters).";
+        if (error) *error = "Enter your peer name and a Pandora Key (6+ characters).";
         return false;
     }
 
@@ -213,7 +213,7 @@ bool PandoraController::joinPandoraDirect(const QString& userName, const QString
         return false;
     }
     if (userName.trimmed().isEmpty() || key.size() < 6) {
-        if (error) *error = "Enter your Na'vi name and a valid Pandora Key (at least 6 characters).";
+        if (error) *error = "Enter your peer name and a valid Pandora Key (at least 6 characters).";
         return false;
     }
     if (hostAddress.trimmed().isEmpty() || hostPort == 0) {
@@ -786,7 +786,7 @@ void PandoraController::onMessage(const QJsonObject& m, const QString& peerNodeI
 
         network_.markSocketAuthenticated(socket, ch.clientNodeId, peerAddress, ch.clientListenPort);
         publish(EventType::NodeJoined, {{"node", newPeer.toJson()}});
-        emit logLine(QString("Na'vi '%1' (%2:%3) authenticated and joined Pandora.")
+        emit logLine(QString("Peer '%1' (%2:%3) authenticated and joined Pandora.")
                      .arg(newPeer.name, peerAddress).arg(newPeer.port));
 
         triggerReplicaAuditAndRepair();
@@ -1189,7 +1189,7 @@ void PandoraController::onPeerDisconnected(const QString& nodeId) {
     if (!active_) return;
     const NodeInfo peer = metadata_.node(nodeId);
     metadata_.updateNodeStatus(nodeId, false);
-    emit logLine(QString("Na'vi '%1' (%2) disconnected.").arg(peer.name.isEmpty() ? nodeId.left(8) : peer.name, nodeId.left(8)));
+    emit logLine(QString("Peer '%1' (%2) disconnected.").arg(peer.name.isEmpty() ? nodeId.left(8) : peer.name, nodeId.left(8)));
 
     // Clean up any in-flight pushes to this peer
     const auto pushKeys = activePushes_.keys();

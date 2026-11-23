@@ -6,6 +6,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QMessageBox>
+#include <QScrollArea>
 #include <QSplitter>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -21,69 +22,183 @@ QString MainWindow::formatBytes(qint64 bytes) {
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("Pandora — Decentralized Peer-to-Peer LAN Cloud");
-    resize(1180, 780);
+    resize(1240, 800);
 
     auto* root = new QWidget(this);
     auto* main = new QVBoxLayout(root);
+    main->setContentsMargins(14, 12, 14, 12);
     main->setSpacing(10);
 
-    // Header
+    // 1. Header Row (Title + Offline/Online Role Badge)
     auto* headerLayout = new QHBoxLayout;
     auto* title = new QLabel(
-        "<h1 style='margin:0;color:#66b2ff;'>Pandora</h1>"
-        "<span style='color:#9aa4b8;'>Session-based decentralized peer-to-peer LAN storage cloud</span>");
+        "<h1 style='margin:0;color:#66b2ff;font-size:22px;'>Pandora</h1>"
+        "<span style='color:#9aa4b8;font-size:12px;'>Session-based decentralized peer-to-peer LAN storage cloud</span>");
     headerLayout->addWidget(title);
     headerLayout->addStretch();
 
     roleBadge_ = new QLabel("Offline");
-    roleBadge_->setStyleSheet("background:#2b303c;color:#aab2c0;padding:6px 12px;border-radius:4px;font-weight:bold;");
+    roleBadge_->setStyleSheet("background:#2b303c;color:#aab2c0;padding:6px 14px;border-radius:4px;font-weight:bold;");
     headerLayout->addWidget(roleBadge_);
     main->addLayout(headerLayout);
 
-    // Shutdown Countdown Warning Banner (hidden unless shutdown is active)
+    // 2. Status Summary Bar (Directly under headers)
+    auto* statusFrame = new QWidget;
+    statusFrame->setStyleSheet("background:#1a1e26;border:1px solid #2b313d;border-radius:5px;");
+    auto* statusRow = new QHBoxLayout(statusFrame);
+    statusRow->setContentsMargins(12, 6, 12, 6);
+    status_ = new QLabel("Pandora Inactive");
+    status_->setStyleSheet("font-weight:bold;color:#7ec8ff;border:none;");
+    nodeCount_ = new QLabel("Peers Online: 0");
+    nodeCount_->setStyleSheet("color:#c8d0e0;font-weight:600;border:none;");
+    cloudStorageSummary_ = new QLabel("Cloud Used: 0 B / Allocated Capacity: 0 B");
+    cloudStorageSummary_->setStyleSheet("color:#aab2c0;border:none;");
+    statusRow->addWidget(status_);
+    statusRow->addStretch();
+    statusRow->addWidget(cloudStorageSummary_);
+    statusRow->addSpacing(24);
+    statusRow->addWidget(nodeCount_);
+    main->addWidget(statusFrame);
+
+    // 3. Shutdown Countdown Warning Banner (hidden unless shutdown is active)
     shutdownBanner_ = new QWidget;
     shutdownBanner_->setStyleSheet("background:#5a1e24;border:1px solid #d9534f;border-radius:6px;padding:6px;");
     auto* bannerLayout = new QHBoxLayout(shutdownBanner_);
     shutdownBannerLabel_ = new QLabel("Shutdown countdown active!");
     shutdownBannerLabel_->setStyleSheet("color:#ffd6d6;font-weight:bold;");
     cancelShutdownButton_ = new QPushButton("Cancel Shutdown");
-    cancelShutdownButton_->setStyleSheet("background:#8c2d35;color:white;padding:5px 10px;");
+    cancelShutdownButton_->setStyleSheet("background:#8c2d35;color:white;padding:5px 12px;");
     bannerLayout->addWidget(shutdownBannerLabel_, 1);
     bannerLayout->addWidget(cancelShutdownButton_);
     shutdownBanner_->setVisible(false);
     main->addWidget(shutdownBanner_);
 
-    // Top Session Control Tabs: Create | Join | Settings
+    // 4. Main Horizontal Split:
+    //    Left Half  = Pandora Distributed Files (Full height below headers & status)
+    //    Right Half = Top: Create / Join / Settings Tabs
+    //                 Middle: Connected Peers & Storage Utilization
+    //                 Bottom: Session Audit & Diagnostic Logs
+    auto* mainSplit = new QSplitter(Qt::Horizontal);
+    mainSplit->setHandleWidth(8);
+
+    // ==================== LEFT HALF: Pandora Distributed Files ====================
+    auto* fileBox = new QWidget;
+    auto* fileLayout = new QVBoxLayout(fileBox);
+    fileLayout->setContentsMargins(0, 0, 6, 0);
+    fileLayout->setSpacing(8);
+
+    auto* filesHeaderRow = new QHBoxLayout;
+    auto* filesTitle = new QLabel("<b style='font-size:13px;color:#e8eaf0;'>Pandora Distributed Files</b>");
+    auto* filesHint = new QLabel("<span style='color:#8792a6;font-size:11px;'>Replicated across connected peers</span>");
+    filesHeaderRow->addWidget(filesTitle);
+    filesHeaderRow->addStretch();
+    filesHeaderRow->addWidget(filesHint);
+    fileLayout->addLayout(filesHeaderRow);
+
+    filesTable_ = new QTableWidget(0, 5);
+    filesTable_->setHorizontalHeaderLabels({"File / Folder Path", "Size", "Replicas", "Version", "SHA-256"});
+    filesTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    filesTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    filesTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    filesTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    filesTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    filesTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    filesTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    filesTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    filesTable_->setAlternatingRowColors(true);
+    filesTable_->verticalHeader()->setVisible(false);
+    fileLayout->addWidget(filesTable_, 1);
+
+    auto* fileButtons = new QHBoxLayout;
+    fileButtons->setSpacing(6);
+    uploadButton_ = new QPushButton("Upload File");
+    uploadFolderButton_ = new QPushButton("Upload Folder");
+    downloadButton_ = new QPushButton("Download Selected");
+    downloadAllButton_ = new QPushButton("Download All");
+    deleteButton_ = new QPushButton("Delete Selected");
+    fileButtons->addWidget(uploadButton_);
+    fileButtons->addWidget(uploadFolderButton_);
+    fileButtons->addWidget(downloadButton_);
+    fileButtons->addWidget(downloadAllButton_);
+    fileButtons->addWidget(deleteButton_);
+    fileLayout->addLayout(fileButtons);
+
+    auto* progressRow = new QHBoxLayout;
+    transferStatusLabel_ = new QLabel("Transfer Status: Idle");
+    transferStatusLabel_->setStyleSheet("color:#9aa4b8;font-size:12px;");
+    transferProgressBar_ = new QProgressBar;
+    transferProgressBar_->setRange(0, 100);
+    transferProgressBar_->setValue(0);
+    transferProgressBar_->setFixedHeight(18);
+    progressRow->addWidget(transferStatusLabel_);
+    progressRow->addWidget(transferProgressBar_, 1);
+    fileLayout->addLayout(progressRow);
+
+    mainSplit->addWidget(fileBox);
+
+    // ==================== RIGHT HALF: Controls + Peers + Logs ====================
+    auto* rightSplit = new QSplitter(Qt::Vertical);
+    rightSplit->setHandleWidth(8);
+
+    // Right-Top: Session Control Tabs (Create | Join | Settings & Quotas)
+    auto* topRightBox = new QWidget;
+    topRightBox->setMinimumHeight(90);
+    topRightBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    auto* topRightLayout = new QVBoxLayout(topRightBox);
+    topRightLayout->setContentsMargins(6, 0, 0, 4);
+    topRightLayout->setSpacing(0);
     sessionTabs_ = new QTabWidget;
+    sessionTabs_->setMinimumHeight(80);
+    sessionTabs_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    auto wrapScroll = [](QWidget* content) -> QScrollArea* {
+        auto* scroll = new QScrollArea;
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setMinimumHeight(40);
+        scroll->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
+        scroll->setWidget(content);
+        return scroll;
+    };
 
     // Tab 1: Create Pandora
     auto* createTab = new QWidget;
     auto* createForm = new QFormLayout(createTab);
+    createForm->setContentsMargins(12, 10, 12, 10);
+    createForm->setSpacing(6);
     pandoraName_ = new QLineEdit("My Pandora");
-    userName_ = new QLineEdit("Neytiri");
+    pandoraName_->setPlaceholderText("Enter a session name (e.g. TeamStorage)");
+    userName_ = new QLineEdit("Peer-1");
+    userName_->setPlaceholderText("Enter your display name");
     key_ = new QLineEdit;
     key_->setEchoMode(QLineEdit::Password);
     key_->setPlaceholderText("Minimum 6 characters (PBKDF2-HMAC-SHA256)");
     createButton_ = new QPushButton("Create Pandora Session");
     createForm->addRow("Pandora Name:", pandoraName_);
-    createForm->addRow("Your Na'vi Name:", userName_);
+    createForm->addRow("Your Peer Name:", userName_);
     createForm->addRow("Pandora Key:", key_);
-    createForm->addRow(createButton_);
-    sessionTabs_->addTab(createTab, "Create Pandora");
+    createForm->addRow("", createButton_);
+    sessionTabs_->addTab(wrapScroll(createTab), "Create Pandora");
 
     // Tab 2: Join Pandora
     auto* joinTab = new QWidget;
     auto* joinLayout = new QHBoxLayout(joinTab);
+    joinLayout->setContentsMargins(10, 8, 10, 8);
+    joinLayout->setSpacing(10);
 
     auto* discBox = new QVBoxLayout;
-    discBox->addWidget(new QLabel("Discovered LAN Sessions (Click to populate):"));
+    discBox->addWidget(new QLabel("Discovered LAN Sessions (Click to select):"));
     discoveredList_ = new QListWidget;
-    discBox->addWidget(discoveredList_);
+    discoveredList_->setMinimumHeight(40);
+    discBox->addWidget(discoveredList_, 1);
     joinLayout->addLayout(discBox, 1);
 
     auto* joinFormWidget = new QWidget;
     auto* joinForm = new QFormLayout(joinFormWidget);
-    joinUserName_ = new QLineEdit("JakeSully");
+    joinForm->setContentsMargins(4, 0, 0, 0);
+    joinForm->setSpacing(4);
+    joinUserName_ = new QLineEdit("Peer-2");
+    joinUserName_->setPlaceholderText("Enter your display name");
     joinKey_ = new QLineEdit;
     joinKey_->setEchoMode(QLineEdit::Password);
     joinKey_->setPlaceholderText("Enter session Pandora Key");
@@ -92,21 +207,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     joinHostPort_->setRange(1, 65535);
     joinHostPort_->setValue(43170);
     joinPandoraId_ = new QLineEdit;
-    joinPandoraId_->setPlaceholderText("Optional (auto-filled from selection)");
+    joinPandoraId_->setPlaceholderText("Optional (auto-filled on click)");
     joinButton_ = new QPushButton("Authenticate && Join Pandora");
 
-    joinForm->addRow("Your Na'vi Name:", joinUserName_);
+    joinForm->addRow("Your Peer Name:", joinUserName_);
     joinForm->addRow("Pandora Key:", joinKey_);
     joinForm->addRow("Host IP Address:", joinHostAddress_);
     joinForm->addRow("Host TCP Port:", joinHostPort_);
     joinForm->addRow("Session ID:", joinPandoraId_);
-    joinForm->addRow(joinButton_);
+    joinForm->addRow("", joinButton_);
     joinLayout->addWidget(joinFormWidget, 1);
-    sessionTabs_->addTab(joinTab, "Join Pandora (LAN)");
+    sessionTabs_->addTab(wrapScroll(joinTab), "Join Pandora (LAN)");
 
     // Tab 3: Settings & Quotas
     auto* settingsTab = new QWidget;
     auto* settingsForm = new QFormLayout(settingsTab);
+    settingsForm->setContentsMargins(12, 10, 12, 10);
+    settingsForm->setSpacing(6);
     replicationFactorSpin_ = new QSpinBox;
     replicationFactorSpin_->setRange(1, 10);
     replicationFactorSpin_->setValue(controller_.replicationFactor());
@@ -123,79 +240,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     settingsForm->addRow("Target Replication Factor:", replicationFactorSpin_);
     settingsForm->addRow("Local Storage Quota Allocation:", quotaGiBSpin_);
     settingsForm->addRow("Preferred Local TCP Port:", tcpPortSpin_);
-    settingsForm->addRow(applySettingsButton_);
-    sessionTabs_->addTab(settingsTab, "Settings && Quotas");
+    settingsForm->addRow("", applySettingsButton_);
+    sessionTabs_->addTab(wrapScroll(settingsTab), "Settings && Quotas");
 
-    main->addWidget(sessionTabs_);
+    topRightLayout->addWidget(sessionTabs_);
+    rightSplit->addWidget(topRightBox);
 
-    // Status Row
-    auto* statusRow = new QHBoxLayout;
-    status_ = new QLabel("Pandora Inactive");
-    status_->setStyleSheet("font-weight:bold;color:#7ec8ff;");
-    nodeCount_ = new QLabel("Na'vi Online: 0");
-    cloudStorageSummary_ = new QLabel("Cloud Used: 0 B / Capacity: 0 B");
-    statusRow->addWidget(status_);
-    statusRow->addStretch();
-    statusRow->addWidget(cloudStorageSummary_);
-    statusRow->addSpacing(20);
-    statusRow->addWidget(nodeCount_);
-    main->addLayout(statusRow);
-
-    // Main Splitter: Left = Files & Transfers, Right = Peers & Session Logs
-    auto* split = new QSplitter(Qt::Horizontal);
-
-    // Left Pane: Files Table
-    auto* fileBox = new QWidget;
-    auto* fileLayout = new QVBoxLayout(fileBox);
-    fileLayout->setContentsMargins(0, 0, 4, 0);
-    fileLayout->addWidget(new QLabel("<b>Pandora Distributed Files</b>"));
-
-    filesTable_ = new QTableWidget(0, 5);
-    filesTable_->setHorizontalHeaderLabels({"File / Folder Path", "Size", "Replicas", "Version", "SHA-256"});
-    filesTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    filesTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    filesTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    filesTable_->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    filesTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    filesTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    filesTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    filesTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    fileLayout->addWidget(filesTable_, 1);
-
-    auto* fileButtons = new QHBoxLayout;
-    uploadButton_ = new QPushButton("Upload File");
-    uploadFolderButton_ = new QPushButton("Upload Folder");
-    downloadButton_ = new QPushButton("Download Selected");
-    downloadAllButton_ = new QPushButton("Download All");
-    deleteButton_ = new QPushButton("Delete Selected");
-    fileButtons->addWidget(uploadButton_);
-    fileButtons->addWidget(uploadFolderButton_);
-    fileButtons->addWidget(downloadButton_);
-    fileButtons->addWidget(downloadAllButton_);
-    fileButtons->addWidget(deleteButton_);
-    fileLayout->addLayout(fileButtons);
-
-    auto* progressRow = new QHBoxLayout;
-    transferStatusLabel_ = new QLabel("Idle");
-    transferProgressBar_ = new QProgressBar;
-    transferProgressBar_->setRange(0, 100);
-    transferProgressBar_->setValue(0);
-    progressRow->addWidget(transferStatusLabel_);
-    progressRow->addWidget(transferProgressBar_, 1);
-    fileLayout->addLayout(progressRow);
-
-    split->addWidget(fileBox);
-
-    // Right Pane: Connected Na'vi Peers + Diagnostic Logs
-    auto* rightSplit = new QSplitter(Qt::Vertical);
-
+    // Right-Middle: Connected Peers & Storage Utilization
     auto* peerBox = new QWidget;
+    peerBox->setMinimumHeight(110);
     auto* peerLayout = new QVBoxLayout(peerBox);
-    peerLayout->setContentsMargins(4, 0, 0, 0);
-    peerLayout->addWidget(new QLabel("<b>Connected Na'vi Peers && Storage Utilization</b>"));
+    peerLayout->setContentsMargins(6, 4, 0, 4);
+    peerLayout->setSpacing(6);
+    peerLayout->addWidget(new QLabel("<b style='font-size:13px;color:#e8eaf0;'>Connected Peers && Storage Utilization</b>"));
 
     peersTable_ = new QTableWidget(0, 5);
-    peersTable_->setHorizontalHeaderLabels({"Na'vi Name", "Role", "Status / Endpoint", "Used / Quota", "Free Disk"});
+    peersTable_->setMinimumHeight(70);
+    peersTable_->setHorizontalHeaderLabels({"Peer Name", "Role", "Status / Endpoint", "Used / Quota", "Free Disk"});
     peersTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     peersTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     peersTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
@@ -203,30 +264,47 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     peersTable_->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     peersTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     peersTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    peerLayout->addWidget(peersTable_);
+    peersTable_->setAlternatingRowColors(true);
+    peersTable_->verticalHeader()->setVisible(false);
+    peerLayout->addWidget(peersTable_, 1);
     rightSplit->addWidget(peerBox);
 
+    // Right-Bottom: Session Audit & Diagnostic Logs
     auto* logBox = new QWidget;
+    logBox->setMinimumHeight(100);
     auto* logLayout = new QVBoxLayout(logBox);
-    logLayout->setContentsMargins(4, 0, 0, 0);
-    logLayout->addWidget(new QLabel("<b>Session Audit && Diagnostic Logs</b>"));
+    logLayout->setContentsMargins(6, 4, 0, 0);
+    logLayout->setSpacing(6);
+    logLayout->addWidget(new QLabel("<b style='font-size:13px;color:#e8eaf0;'>Session Audit && Diagnostic Logs</b>"));
     logs_ = new QPlainTextEdit;
+    logs_->setMinimumHeight(60);
     logs_->setReadOnly(true);
-    logLayout->addWidget(logs_);
+    logLayout->addWidget(logs_, 1);
     rightSplit->addWidget(logBox);
 
-    split->addWidget(rightSplit);
-    split->setStretchFactor(0, 3);
-    split->setStretchFactor(1, 2);
-    main->addWidget(split, 1);
+    rightSplit->setChildrenCollapsible(false);
+    rightSplit->setStretchFactor(0, 1);
+    rightSplit->setStretchFactor(1, 1);
+    rightSplit->setStretchFactor(2, 1);
+    rightSplit->setSizes({240, 220, 200});
 
-    // Bottom Deactivation Bar
+    mainSplit->addWidget(rightSplit);
+    mainSplit->setStretchFactor(0, 1);
+    mainSplit->setStretchFactor(1, 1);
+    mainSplit->setSizes({600, 600});
+    main->addWidget(mainSplit, 1);
+
+    // 5. Bottom Deactivation Bar
     auto* bottomRow = new QHBoxLayout;
+    bottomRow->setSpacing(10);
     countdownShutdownButton_ = new QPushButton("Guardian 2-Min Shutdown Countdown");
     countdownShutdownButton_->setEnabled(false);
     deactivateButton_ = new QPushButton("Leave / Deactivate Immediately");
     deactivateButton_->setEnabled(false);
-    deactivateButton_->setStyleSheet("background:#6e2b32;color:white;padding:8px 14px;border-radius:4px;");
+    deactivateButton_->setStyleSheet(
+        "QPushButton { background:#7a2e36; color:white; padding:8px 14px; border-radius:4px; font-weight:600; }"
+        "QPushButton:hover { background:#943842; }"
+        "QPushButton:disabled { background:#232730; color:#5e6675; }");
     bottomRow->addWidget(countdownShutdownButton_);
     bottomRow->addWidget(deactivateButton_);
     main->addLayout(bottomRow);
@@ -234,16 +312,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setCentralWidget(root);
 
     setStyleSheet(
-        "QMainWindow, QWidget { background:#14171d; color:#e8eaf0; font-family:'Segoe UI', sans-serif; }"
+        "QMainWindow, QWidget { background:#14171d; color:#e8eaf0; font-family:'Segoe UI', sans-serif; font-size:12px; }"
         "QTabWidget::pane { border:1px solid #2e3440; background:#1b1f27; border-radius:4px; }"
-        "QTabBar::tab { background:#1b1f27; color:#a3adbf; padding:8px 16px; border:1px solid #2e3440; border-bottom:none; }"
+        "QTabBar::tab { background:#1b1f27; color:#a3adbf; padding:8px 16px; border:1px solid #2e3440; border-bottom:none; border-top-left-radius:4px; border-top-right-radius:4px; margin-right:2px; }"
         "QTabBar::tab:selected { background:#2b3342; color:#ffffff; font-weight:bold; }"
-        "QLineEdit, QSpinBox, QDoubleSpinBox, QListWidget, QPlainTextEdit, QTableWidget { background:#1e222b; border:1px solid #353c4a; padding:5px; border-radius:3px; }"
-        "QHeaderView::section { background:#252b37; color:#c8d0e0; padding:5px; border:1px solid #353c4a; }"
+        "QLineEdit, QSpinBox, QDoubleSpinBox, QListWidget, QPlainTextEdit, QTableWidget { background:#1e222b; alternate-background-color:#232833; border:1px solid #353c4a; padding:5px; border-radius:4px; color:#e8eaf0; }"
+        "QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus { border:1px solid #589bf5; }"
+        "QHeaderView::section { background:#252b37; color:#c8d0e0; padding:6px; border:1px solid #353c4a; font-weight:600; }"
         "QPushButton { background:#2d4a73; border:0; padding:8px 14px; border-radius:4px; color:#ffffff; font-weight:600; }"
         "QPushButton:hover { background:#3b6094; }"
         "QPushButton:disabled { background:#232730; color:#5e6675; }"
-        "QProgressBar { border:1px solid #353c4a; background:#1e222b; text-align:center; border-radius:3px; }");
+        "QSplitter::handle { background:#232834; border-radius:2px; }"
+        "QSplitter::handle:hover { background:#3b6094; }"
+        "QProgressBar { border:1px solid #353c4a; background:#1e222b; text-align:center; border-radius:4px; color:#ffffff; }"
+        "QProgressBar::chunk { background:#3b7dd8; border-radius:3px; }");
 
     // Wire signals
     connect(createButton_, &QPushButton::clicked, this, &MainWindow::createSession);
@@ -445,7 +527,7 @@ void MainWindow::deleteSelected() {
 void MainWindow::initiateShutdownCountdown() {
     if (QMessageBox::question(
             this, "Initiate 2-Minute Shutdown",
-            "This will warn all connected Na'vi peers and start a 120-second countdown before deactivating Pandora.\n\nProceed?")
+            "This will warn all connected peers and start a 120-second countdown before deactivating Pandora.\n\nProceed?")
         != QMessageBox::Yes) {
         return;
     }
@@ -474,7 +556,7 @@ void MainWindow::refreshDiscoveredSessions() {
     discoveredList_->clear();
     for (const auto& ds : controller_.discoveredSessions()) {
         auto* item = new QListWidgetItem(
-            QString("%1  —  Host: %2 (%3:%4)  [%5 Na'vi]")
+            QString("%1  —  Host: %2 (%3:%4)  [%5 Peers]")
             .arg(ds.name, ds.hostName.isEmpty() ? "Guardian" : ds.hostName, ds.address)
             .arg(ds.port)
             .arg(ds.nodeCount));
@@ -495,15 +577,21 @@ void MainWindow::refreshDashboard() {
     countdownShutdownButton_->setEnabled(active && guardian);
     cancelShutdownButton_->setVisible(active && guardian && controller_.isShuttingDown());
 
+    uploadButton_->setEnabled(active);
+    uploadFolderButton_->setEnabled(active);
+    downloadButton_->setEnabled(active);
+    downloadAllButton_->setEnabled(active);
+    deleteButton_->setEnabled(active);
+
     if (!active) {
         roleBadge_->setText("Offline");
-        roleBadge_->setStyleSheet("background:#2b303c;color:#aab2c0;padding:6px 12px;border-radius:4px;font-weight:bold;");
+        roleBadge_->setStyleSheet("background:#2b303c;color:#aab2c0;padding:6px 14px;border-radius:4px;font-weight:bold;");
     } else if (guardian) {
-        roleBadge_->setText(QString("Guardian (Port %1)").arg(controller_.tcpPort()));
-        roleBadge_->setStyleSheet("background:#1e5631;color:#a4fba6;padding:6px 12px;border-radius:4px;font-weight:bold;");
+        roleBadge_->setText(QString("Online — Guardian (Port %1)").arg(controller_.tcpPort()));
+        roleBadge_->setStyleSheet("background:#1e5631;color:#a4fba6;padding:6px 14px;border-radius:4px;font-weight:bold;");
     } else {
-        roleBadge_->setText(QString("Connected Peer (Port %1)").arg(controller_.tcpPort()));
-        roleBadge_->setStyleSheet("background:#1e3f66;color:#99ccff;padding:6px 12px;border-radius:4px;font-weight:bold;");
+        roleBadge_->setText(QString("Online — Connected Peer (Port %1)").arg(controller_.tcpPort()));
+        roleBadge_->setStyleSheet("background:#1e3f66;color:#99ccff;padding:6px 14px;border-radius:4px;font-weight:bold;");
     }
 
     // Populate Files Table
@@ -548,7 +636,7 @@ void MainWindow::refreshDashboard() {
         }
 
         const QString displayName = (nid == myId) ? (n.name + " (You)") : n.name;
-        const QString roleStr = (nid == guardianId) ? "Guardian" : "Na'vi Peer";
+        const QString roleStr = (nid == guardianId) ? "Guardian" : "Peer";
         const QString statusStr = QString("%1 (%2:%3)")
             .arg(n.connected ? "Online" : "Offline", n.address.isEmpty() ? "LAN" : n.address)
             .arg(n.port);
@@ -562,7 +650,7 @@ void MainWindow::refreshDashboard() {
         peersTable_->setItem(i, 4, new QTableWidgetItem(diskStr));
     }
 
-    nodeCount_->setText(QString("Na'vi Online: %1 / %2").arg(onlineCount).arg(nodes.size()));
+    nodeCount_->setText(QString("Peers Online: %1 / %2").arg(onlineCount).arg(nodes.size()));
     cloudStorageSummary_->setText(QString("Cloud Used: %1 / Allocated Capacity: %2")
                                   .arg(formatBytes(totalUsed), formatBytes(totalQuota)));
 }
