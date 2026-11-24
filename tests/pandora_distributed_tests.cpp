@@ -346,6 +346,71 @@ private slots:
         QVERIFY2(waitUntil([&]() { return !host.isActive() && !peer.isActive(); }, 6000),
                  "Both host and peer must automatically deactivate and wipe temp storage when countdown finishes");
     }
+
+    void testDistributedInMemoryTextEditAndSync() {
+        PandoraController host;
+        PandoraController peer;
+        host.setPreferredPorts(43230, 43297);
+        peer.setPreferredPorts(43231, 43297);
+        host.setReplicationFactor(2);
+        peer.setReplicationFactor(2);
+
+        QString err;
+        QVERIFY2(host.createPandora("EditorCloud", "HostEditor", "PandoraEdit88", &err), qPrintable(err));
+        QVERIFY2(peer.joinPandoraDirect("PeerEditor", "PandoraEdit88", "127.0.0.1", host.tcpPort(), {}, &err), qPrintable(err));
+        QVERIFY2(waitUntil([&]() { return peer.isActive() && host.metadata()->nodes(true).size() == 2; }, 6000),
+                 "Host and peer must connect");
+
+        QVERIFY(PandoraController::isEditableTextFileName("main.cpp"));
+        QVERIFY(PandoraController::isEditableTextFileName("script.py"));
+        QVERIFY(PandoraController::isEditableTextFileName("notes.txt"));
+        QVERIFY(PandoraController::isEditableTextFileName("kernel.c"));
+        QVERIFY(PandoraController::isImageFileName("photo.png"));
+        QVERIFY(PandoraController::isImageFileName("banner.jpg"));
+        QVERIFY(PandoraController::isVideoFileName("demo.mp4"));
+        QVERIFY(PandoraController::isVideoFileName("lecture.mkv"));
+        QVERIFY(PandoraController::isMediaFileName("clip.webm"));
+        QVERIFY(!PandoraController::isEditableTextFileName("archive.zip"));
+        QVERIFY(!PandoraController::isMediaFileName("archive.zip"));
+
+        // Host uploads main.cpp
+        QTemporaryDir tempDir;
+        const QString cppPath = tempDir.filePath("main.cpp");
+        const QByteArray initialCode = "#include <iostream>\nint main() { return 0; }\n";
+        {
+            QFile f(cppPath);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            QCOMPARE(f.write(initialCode), initialCode.size());
+        }
+        QVERIFY2(host.uploadFile(cppPath, &err), qPrintable(err));
+        const QString fileId = host.metadata()->files().first().id.toString(QUuid::WithoutBraces);
+
+        // Wait for replica to arrive at peer
+        QVERIFY2(waitUntil([&]() {
+            return peer.storage()->hasReplica(fileId);
+        }, 6000), "Initial main.cpp replica must arrive on peer");
+
+        // Peer opens file in-app (without downloading to disk) and edits it
+        QByteArray loadedBytes;
+        bool waitingRemote = false;
+        QVERIFY2(peer.fetchFileContentForViewing(fileId, &loadedBytes, &waitingRemote, &err), qPrintable(err));
+        QVERIFY(!waitingRemote);
+        QCOMPARE(loadedBytes, initialCode);
+
+        const QByteArray editedCode = "#include <iostream>\nint main() {\n    std::cout << \"Edited in Pandora!\" << std::endl;\n    return 0;\n}\n";
+        QVERIFY2(peer.updateTextFileContent(fileId, editedCode, &err), qPrintable(err));
+
+        // Verify host receives v2 metadata and updated physical replica content
+        QVERIFY2(waitUntil([&]() {
+            const FileInfo hostFile = host.metadata()->file(fileId);
+            bool ok = false;
+            const QByteArray hostBytes = host.storage()->readAllBytes(fileId, &ok);
+            return hostFile.version == 2ULL && ok && hostBytes == editedCode;
+        }, 6000), "Host must receive updated v2 replica content after peer saves edits");
+
+        host.deactivatePandora(false);
+        peer.deactivatePandora(false);
+    }
 };
 
 QTEST_MAIN(PandoraDistributedTests)

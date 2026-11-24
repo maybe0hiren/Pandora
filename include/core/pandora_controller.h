@@ -51,6 +51,15 @@ public:
     bool downloadAllFiles(const QString& destinationDirectory, int* exportedOrQueuedCount = nullptr, QString* error = nullptr);
     bool deleteFile(const QString& fileId, QString* error = nullptr);
 
+    // In-memory text editing & distributed synchronization (no export to user disk)
+    static bool isEditableTextFileName(const QString& fileName);
+    static bool isImageFileName(const QString& fileName);
+    static bool isVideoFileName(const QString& fileName);
+    static bool isMediaFileName(const QString& fileName);
+    bool fetchFileContentForViewing(const QString& fileId, QByteArray* immediateContentOut = nullptr, bool* waitingForRemotePullOut = nullptr, QString* error = nullptr);
+    bool fetchFileReplicaForMediaViewing(const QString& fileId, QString* immediateReplicaPathOut = nullptr, bool* waitingForRemotePullOut = nullptr, QString* error = nullptr);
+    bool updateTextFileContent(const QString& fileId, const QByteArray& newUtf8Content, QString* error = nullptr);
+
     bool initiateGuardianShutdown(int countdownSeconds = 120, QString* error = nullptr);
     bool cancelGuardianShutdown(QString* error = nullptr);
     void deactivatePandora(bool broadcastIfGuardian = true);
@@ -71,6 +80,9 @@ signals:
     void joinFailed(const QString& reason);
     void transferProgressUpdated(const pandora::TransferProgress& progress);
     void remoteDownloadCompleted(const QString& fileId, const QString& destinationPath);
+    void fileContentReady(const QString& fileId, const QByteArray& content);
+    void fileReplicaReadyForViewing(const QString& fileId, const QString& replicaBlobPath);
+    void fileContentFetchFailed(const QString& fileId, const QString& reason);
     void shutdownCountdownUpdated(int secondsRemaining);
 
 private slots:
@@ -120,6 +132,8 @@ private:
         QString fileName;
         QString sourceNodeId;
         QString exportDestination; // Non-empty when user requested Download
+        bool forEditorView{false}; // True when pulling into memory/replica cache for in-app text editor
+        bool forMediaView{false};  // True when pulling into replica cache for in-app image/video player
         qint64 fileSize{0};
         QString sha256;
         qint64 nextOffset{0};
@@ -130,7 +144,7 @@ private:
     void startReplicationForFile(const FileInfo& f);
     void pushReplicaToNode(const FileInfo& f, const QString& targetNodeId, const QString& directionLabel = "Replication");
     void sendNextPushChunk(const QString& transferKey);
-    void requestPullFromNode(const FileInfo& f, const QString& sourceNodeId, const QString& exportDest);
+    void requestPullFromNode(const FileInfo& f, const QString& sourceNodeId, const QString& exportDest, bool forEditorView = false, bool forMediaView = false);
     void connectToKnownPeers();
     void checkGuardianHealthAndElect();
 

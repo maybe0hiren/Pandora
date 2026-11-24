@@ -219,8 +219,14 @@ bool MetadataStore::updateFile(const FileInfo& f, QString* error) {
         if (error) *error = "File not found.";
         return false;
     }
-    if (isFileNewer(f, *it)) {
-        *it = f;
+    FileInfo copy = f;
+    const QString actorStr = copy.modifiedBy.toString(QUuid::WithoutBraces);
+    if (!actorStr.isEmpty()) {
+        copy.versionVector[actorStr] = qMax(copy.versionVector.value(actorStr, 0),
+                                            it->versionVector.value(actorStr, 0) + 1);
+    }
+    if (isFileNewer(copy, *it)) {
+        *it = copy;
         persistFileUnlocked(*it);
     }
     l.unlock();

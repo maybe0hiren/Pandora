@@ -89,7 +89,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     auto* filesHeaderRow = new QHBoxLayout;
     auto* filesTitle = new QLabel("<b style='font-size:13px;color:#e8eaf0;'>Pandora Distributed Files</b>");
-    auto* filesHint = new QLabel("<span style='color:#8792a6;font-size:11px;'>Replicated across connected peers</span>");
+    auto* filesHint = new QLabel("<span style='color:#8792a6;font-size:11px;'>Click any text/code file to edit, or image/video file to view in-app</span>");
     filesHeaderRow->addWidget(filesTitle);
     filesHeaderRow->addStretch();
     filesHeaderRow->addWidget(filesHint);
@@ -113,11 +113,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     fileButtons->setSpacing(6);
     uploadButton_ = new QPushButton("Upload File");
     uploadFolderButton_ = new QPushButton("Upload Folder");
+    editTextButton_ = new QPushButton("Open / Edit Selected");
     downloadButton_ = new QPushButton("Download Selected");
     downloadAllButton_ = new QPushButton("Download All");
     deleteButton_ = new QPushButton("Delete Selected");
     fileButtons->addWidget(uploadButton_);
     fileButtons->addWidget(uploadFolderButton_);
+    fileButtons->addWidget(editTextButton_);
     fileButtons->addWidget(downloadButton_);
     fileButtons->addWidget(downloadAllButton_);
     fileButtons->addWidget(deleteButton_);
@@ -335,6 +337,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     connect(uploadButton_, &QPushButton::clicked, this, &MainWindow::uploadFile);
     connect(uploadFolderButton_, &QPushButton::clicked, this, &MainWindow::uploadFolder);
+    connect(editTextButton_, &QPushButton::clicked, this, &MainWindow::editSelectedTextFile);
+    connect(filesTable_, &QTableWidget::cellClicked, this, &MainWindow::onFileTableCellClicked);
     connect(downloadButton_, &QPushButton::clicked, this, &MainWindow::downloadSelected);
     connect(downloadAllButton_, &QPushButton::clicked, this, &MainWindow::downloadAll);
     connect(deleteButton_, &QPushButton::clicked, this, &MainWindow::deleteSelected);
@@ -352,6 +356,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(&controller_, &PandoraController::logLine, this, &MainWindow::appendLog);
     connect(&controller_, &PandoraController::discoveredSessionsChanged, this, &MainWindow::refreshDiscoveredSessions);
     connect(&controller_, &PandoraController::transferProgressUpdated, this, &MainWindow::onTransferProgress);
+    connect(&controller_, &PandoraController::fileContentReady, this, &MainWindow::onFileContentReady);
+    connect(&controller_, &PandoraController::fileReplicaReadyForViewing, this, &MainWindow::onFileReplicaReadyForViewing);
+    connect(&controller_, &PandoraController::fileContentFetchFailed, this, &MainWindow::onFileContentFetchFailed);
     connect(&controller_, &PandoraController::shutdownCountdownUpdated, this, &MainWindow::onShutdownCountdownUpdated);
 
     connect(&controller_, &PandoraController::joinSucceeded, this, [this](const QString& name) {
@@ -481,6 +488,139 @@ void MainWindow::uploadFolder() {
     }
 }
 
+void MainWindow::onFileTableCellClicked(int row, int /*column*/) {
+    if (row < 0) return;
+    auto* item = filesTable_->item(row, 0);
+    if (!item) return;
+    const QString fileId = item->data(Qt::UserRole).toString();
+    const QString fileName = item->text();
+    if (fileId.isEmpty()) return;
+
+    if (PandoraController::isEditableTextFileName(fileName)) {
+        openTextEditorForFile(fileId);
+    } else if (PandoraController::isMediaFileName(fileName)) {
+        openMediaViewerForFile(fileId);
+    }
+}
+
+void MainWindow::editSelectedTextFile() {
+    const QString id = selectedFileId();
+    const QString name = selectedFileName();
+    if (id.isEmpty()) {
+        QMessageBox::information(this, "Open / Edit File", "Select a text, code, image, or video file in the table first.");
+        return;
+    }
+    if (PandoraController::isEditableTextFileName(name)) {
+        openTextEditorForFile(id);
+        return;
+    }
+    if (PandoraController::isMediaFileName(name)) {
+        openMediaViewerForFile(id);
+        return;
+    }
+    QMessageBox::information(
+        this, "Unsupported File Type",
+        QString("'%1' is not recognized as an in-app editable text file or playable image/video.\n\n"
+                "• Editable text/code: .txt, .c, .cpp, .h, .py, .js, .ts, .java, .json, .md, .html, .css, .sql, .sh, .ps1\n"
+                "• Viewable images: .png, .jpg, .jpeg, .gif, .bmp, .webp, .ico, .tiff\n"
+                "• Playable videos: .mp4, .mkv, .avi, .mov, .webm, .wmv, .m4v, .mpg")
+            .arg(name));
+}
+
+void MainWindow::openMediaViewerForFile(const QString& fileId) {
+    bool found = false;
+    const FileInfo f = controller_.metadata()->file(fileId, &found);
+    if (!found || f.tombstone) return;
+
+    if (openMediaViewers_.contains(fileId) && !openMediaViewers_[fileId].isNull()) {
+        auto* existing = openMediaViewers_[fileId].data();
+        existing->show();
+        existing->raise();
+        existing->activateWindow();
+        return;
+    }
+
+    const auto kind = PandoraController::isVideoFileName(f.name)
+        ? MediaViewerDialog::MediaKind::Video
+        : MediaViewerDialog::MediaKind::Image;
+
+    auto* dlg = new MediaViewerDialog(fileId, f.name, kind, f.size, this);
+    openMediaViewers_.insert(fileId, dlg);
+    dlg->show();
+    dlg->raise();
+    dlg->activateWindow();
+
+    QString immediateBlobPath;
+    bool waitingRemote = false;
+    QString err;
+    if (!controller_.fetchFileReplicaForMediaViewing(fileId, &immediateBlobPath, &waitingRemote, &err)) {
+        dlg->notifyRemoteFetchFailed(err);
+        return;
+    }
+    if (!waitingRemote && !immediateBlobPath.isEmpty()) {
+        dlg->loadFromReplicaBlob(immediateBlobPath);
+    }
+}
+
+void MainWindow::openTextEditorForFile(const QString& fileId) {
+    bool found = false;
+    const FileInfo f = controller_.metadata()->file(fileId, &found);
+    if (!found || f.tombstone) return;
+
+    // If an editor window is already open for this file, bring it to front
+    if (openEditors_.contains(fileId) && !openEditors_[fileId].isNull()) {
+        auto* existing = openEditors_[fileId].data();
+        existing->show();
+        existing->raise();
+        existing->activateWindow();
+        return;
+    }
+
+    auto* dlg = new TextEditorDialog(
+        fileId,
+        f.name,
+        f.version,
+        [this, fileId](const QByteArray& newUtf8Content, QString* errorOut) -> bool {
+            return controller_.updateTextFileContent(fileId, newUtf8Content, errorOut);
+        },
+        this);
+    openEditors_.insert(fileId, dlg);
+    dlg->show();
+    dlg->raise();
+    dlg->activateWindow();
+
+    QByteArray immediateBytes;
+    bool waitingRemote = false;
+    QString err;
+    if (!controller_.fetchFileContentForViewing(fileId, &immediateBytes, &waitingRemote, &err)) {
+        dlg->notifyRemoteFetchFailed(err);
+        return;
+    }
+    if (!waitingRemote) {
+        dlg->setInitialContent(immediateBytes, f.version);
+    }
+}
+
+void MainWindow::onFileContentReady(const QString& fileId, const QByteArray& content) {
+    if (!openEditors_.contains(fileId) || openEditors_[fileId].isNull()) return;
+    const FileInfo f = controller_.metadata()->file(fileId);
+    openEditors_[fileId]->setInitialContent(content, qMax<quint64>(1, f.version));
+}
+
+void MainWindow::onFileReplicaReadyForViewing(const QString& fileId, const QString& replicaBlobPath) {
+    if (!openMediaViewers_.contains(fileId) || openMediaViewers_[fileId].isNull()) return;
+    openMediaViewers_[fileId]->loadFromReplicaBlob(replicaBlobPath);
+}
+
+void MainWindow::onFileContentFetchFailed(const QString& fileId, const QString& reason) {
+    if (openEditors_.contains(fileId) && !openEditors_[fileId].isNull()) {
+        openEditors_[fileId]->notifyRemoteFetchFailed(reason);
+    }
+    if (openMediaViewers_.contains(fileId) && !openMediaViewers_[fileId].isNull()) {
+        openMediaViewers_[fileId]->notifyRemoteFetchFailed(reason);
+    }
+}
+
 void MainWindow::downloadSelected() {
     const QString id = selectedFileId();
     const QString name = selectedFileName();
@@ -579,6 +719,7 @@ void MainWindow::refreshDashboard() {
 
     uploadButton_->setEnabled(active);
     uploadFolderButton_->setEnabled(active);
+    editTextButton_->setEnabled(active);
     downloadButton_->setEnabled(active);
     downloadAllButton_->setEnabled(active);
     deleteButton_->setEnabled(active);
@@ -606,7 +747,21 @@ void MainWindow::refreshDashboard() {
 
         auto* nameItem = new QTableWidgetItem(f.name);
         nameItem->setData(Qt::UserRole, fid);
+        if (PandoraController::isEditableTextFileName(f.name)) {
+            nameItem->setToolTip("Click to open in Pandora In-App Text Editor (no local download required)");
+            nameItem->setForeground(QColor("#8ce99a"));
+        } else if (PandoraController::isImageFileName(f.name)) {
+            nameItem->setToolTip("Click to view in Pandora In-App Image Viewer (view-only, no local download)");
+            nameItem->setForeground(QColor("#74c0fc"));
+        } else if (PandoraController::isVideoFileName(f.name)) {
+            nameItem->setToolTip("Click to play in Pandora In-App Video Player (view-only, no local download)");
+            nameItem->setForeground(QColor("#e599f7"));
+        }
         filesTable_->setItem(i, 0, nameItem);
+
+        if (openEditors_.contains(fid) && !openEditors_[fid].isNull()) {
+            openEditors_[fid]->notifyExternalUpdate(f.version);
+        }
 
         filesTable_->setItem(i, 1, new QTableWidgetItem(formatBytes(f.size)));
 

@@ -1,13 +1,17 @@
 #pragma once
 
 #include "core/pandora_controller.h"
+#include "ui/media_viewer_dialog.h"
+#include "ui/text_editor_dialog.h"
 #include <QCloseEvent>
 #include <QDoubleSpinBox>
+#include <QHash>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSpinBox>
@@ -30,6 +34,8 @@ private slots:
     void onDiscoveredSessionClicked();
     void uploadFile();
     void uploadFolder();
+    void editSelectedTextFile();
+    void onFileTableCellClicked(int row, int column);
     void downloadSelected();
     void downloadAll();
     void deleteSelected();
@@ -40,6 +46,9 @@ private slots:
     void refreshDashboard();
     void refreshDiscoveredSessions();
     void onTransferProgress(const pandora::TransferProgress& progress);
+    void onFileContentReady(const QString& fileId, const QByteArray& content);
+    void onFileReplicaReadyForViewing(const QString& fileId, const QString& replicaBlobPath);
+    void onFileContentFetchFailed(const QString& fileId, const QString& reason);
     void onShutdownCountdownUpdated(int secondsRemaining);
     void appendLog(const QString& line);
 
@@ -47,8 +56,12 @@ private:
     static QString formatBytes(qint64 bytes);
     QString selectedFileId() const;
     QString selectedFileName() const;
+    void openTextEditorForFile(const QString& fileId);
+    void openMediaViewerForFile(const QString& fileId);
 
     PandoraController controller_;
+    QHash<QString, QPointer<TextEditorDialog>> openEditors_;
+    QHash<QString, QPointer<MediaViewerDialog>> openMediaViewers_;
 
     // Session tabs (Create / Join / Settings)
     QTabWidget* sessionTabs_{nullptr};
@@ -87,6 +100,7 @@ private:
     QTableWidget* filesTable_{nullptr};
     QPushButton* uploadButton_{nullptr};
     QPushButton* uploadFolderButton_{nullptr};
+    QPushButton* editTextButton_{nullptr};
     QPushButton* downloadButton_{nullptr};
     QPushButton* downloadAllButton_{nullptr};
     QPushButton* deleteButton_{nullptr};

@@ -7,7 +7,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets Network Sql Concurrent Test)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets Network Sql Concurrent Multimedia MultimediaWidgets Test)
 
 qt_standard_project_setup()
 
@@ -29,12 +29,16 @@ add_library(PandoraCore STATIC
 )
 
 target_include_directories(PandoraCore PUBLIC include)
-target_link_libraries(PandoraCore PUBLIC Qt6::Widgets Qt6::Network Qt6::Sql Qt6::Concurrent)
+target_link_libraries(PandoraCore PUBLIC Qt6::Widgets Qt6::Network Qt6::Sql Qt6::Concurrent Qt6::Multimedia Qt6::MultimediaWidgets)
 
 add_executable(Pandora
     src/main.cpp
     src/ui/main_window.cpp
+    src/ui/text_editor_dialog.cpp
+    src/ui/media_viewer_dialog.cpp
     include/ui/main_window.h
+    include/ui/text_editor_dialog.h
+    include/ui/media_viewer_dialog.h
 )
 
 target_link_libraries(Pandora PRIVATE PandoraCore)

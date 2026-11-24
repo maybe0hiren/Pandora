@@ -440,6 +440,239 @@ bool PandoraController::deleteFile(const QString& id, QString* error) {
     return true;
 }
 
+bool PandoraController::isEditableTextFileName(const QString& fileName) {
+    static const QSet<QString> kTextExtensions = {
+        "txt", "md", "markdown", "rst", "log", "csv", "tsv",
+        "c", "h", "cpp", "hpp", "cc", "cxx", "hxx", "inl", "ipp",
+        "py", "pyw", "pyi",
+        "js", "jsx", "ts", "tsx", "mjs", "cjs",
+        "java", "kt", "kts", "scala", "groovy", "gradle",
+        "cs", "fs", "vb",
+        "go", "rs", "swift", "dart", "zig", "nim", "lua", "r", "jl", "m", "mm",
+        "rb", "php", "pl", "pm",
+        "html", "htm", "xhtml", "css", "scss", "sass", "less", "svg",
+        "json", "jsonc", "xml", "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "properties",
+        "sql", "graphql", "proto",
+        "sh", "bash", "zsh", "fish", "ps1", "psm1", "psd1", "bat", "cmd",
+        "cmake", "mk", "iss", "gitignore", "gitattributes", "editorconfig", "dockerfile",
+        "tex", "bib", "asm", "s", "vhdl", "v", "sv"
+    };
+    const QFileInfo fi(fileName);
+    const QString ext = fi.suffix().toLower();
+    if (!ext.isEmpty() && kTextExtensions.contains(ext)) {
+        return true;
+    }
+    const QString base = fi.fileName().toLower();
+    static const QSet<QString> kExtensionlessTextNames = {
+        "makefile", "cmakelists.txt", "dockerfile", "readme", "license", "copying",
+        "authors", "changelog", "todo", ".gitignore", ".gitattributes", ".editorconfig", ".env"
+    };
+    return kExtensionlessTextNames.contains(base);
+}
+
+bool PandoraController::isImageFileName(const QString& fileName) {
+    static const QSet<QString> kImageExtensions = {
+        "png", "jpg", "jpeg", "bmp", "gif", "webp", "ico", "tif", "tiff", "ppm", "pgm", "pbm", "xbm", "xpm"
+    };
+    const QString ext = QFileInfo(fileName).suffix().toLower();
+    return !ext.isEmpty() && kImageExtensions.contains(ext);
+}
+
+bool PandoraController::isVideoFileName(const QString& fileName) {
+    static const QSet<QString> kVideoExtensions = {
+        "mp4", "mkv", "avi", "mov", "webm", "wmv", "m4v", "mpg", "mpeg", "flv", "3gp", "ogv", "ts"
+    };
+    const QString ext = QFileInfo(fileName).suffix().toLower();
+    return !ext.isEmpty() && kVideoExtensions.contains(ext);
+}
+
+bool PandoraController::isMediaFileName(const QString& fileName) {
+    return isImageFileName(fileName) || isVideoFileName(fileName);
+}
+
+bool PandoraController::fetchFileReplicaForMediaViewing(const QString& fileId, QString* immediateReplicaPathOut, bool* waitingForRemotePullOut, QString* error) {
+    if (waitingForRemotePullOut) *waitingForRemotePullOut = false;
+    if (!active_) {
+        if (error) *error = "Pandora is not active.";
+        return false;
+    }
+    bool found = false;
+    const FileInfo f = metadata_.file(fileId, &found);
+    if (!found || f.tombstone) {
+        if (error) *error = "File not found in Pandora.";
+        return false;
+    }
+
+    // 1. If we already hold a verified replica in temporary session storage, stream directly from it
+    if (storage_.hasReplica(fileId) && storage_.verifyReplica(fileId, f.sha256, f.size)) {
+        const QString blobPath = storage_.pathFor(fileId);
+        if (immediateReplicaPathOut) *immediateReplicaPathOut = blobPath;
+        emit fileReplicaReadyForViewing(fileId, blobPath);
+        return true;
+    }
+
+    // 2. Otherwise pull replica from an online peer into temporary session storage (no user disk download)
+    if (activePulls_.contains(fileId)) {
+        activePulls_[fileId].forMediaView = true;
+        if (waitingForRemotePullOut) *waitingForRemotePullOut = true;
+        return true;
+    }
+
+    QStringList candidatePeers;
+    for (const QString& peerId : f.replicas) {
+        if (peerId != localNodeIdString() && network_.isNodeConnected(peerId)) {
+            candidatePeers.append(peerId);
+        }
+    }
+    if (candidatePeers.isEmpty()) {
+        candidatePeers = network_.connectedNodeIds();
+    }
+    if (candidatePeers.isEmpty()) {
+        if (error) *error = "No online peers holding a replica of this media file are currently reachable.";
+        return false;
+    }
+
+    const QString sourceNode = candidatePeers.first();
+    requestPullFromNode(f, sourceNode, QString(), false, true);
+    if (waitingForRemotePullOut) *waitingForRemotePullOut = true;
+    emit logLine(QString("Streaming media replica '%1' from peer %2 for in-app viewer...").arg(f.name, sourceNode.left(8)));
+    return true;
+}
+
+bool PandoraController::fetchFileContentForViewing(const QString& fileId, QByteArray* immediateContentOut, bool* waitingForRemotePullOut, QString* error) {
+    if (waitingForRemotePullOut) *waitingForRemotePullOut = false;
+    if (!active_) {
+        if (error) *error = "Pandora is not active.";
+        return false;
+    }
+    bool found = false;
+    const FileInfo f = metadata_.file(fileId, &found);
+    if (!found || f.tombstone) {
+        if (error) *error = "File not found in Pandora.";
+        return false;
+    }
+    static constexpr qint64 kMaxEditableBytes = 16LL * 1024 * 1024; // 16 MiB cap for lightweight in-memory editor
+    if (f.size > kMaxEditableBytes) {
+        if (error) *error = "File exceeds 16 MiB in-app text editor limit.";
+        return false;
+    }
+
+    // 1. Read directly from local temporary replica if present and valid
+    if (storage_.hasReplica(fileId) && storage_.verifyReplica(fileId, f.sha256, f.size)) {
+        bool ok = false;
+        QString readErr;
+        const QByteArray data = storage_.readAllBytes(fileId, &ok, &readErr);
+        if (!ok) {
+            if (error) *error = readErr;
+            return false;
+        }
+        if (immediateContentOut) *immediateContentOut = data;
+        emit fileContentReady(fileId, data);
+        return true;
+    }
+
+    // 2. Otherwise pull replica from an online peer into temporary session storage (no user disk download)
+    if (activePulls_.contains(fileId)) {
+        activePulls_[fileId].forEditorView = true;
+        if (waitingForRemotePullOut) *waitingForRemotePullOut = true;
+        return true;
+    }
+
+    QStringList candidatePeers;
+    for (const QString& peerId : f.replicas) {
+        if (peerId != localNodeIdString() && network_.isNodeConnected(peerId)) {
+            candidatePeers.append(peerId);
+        }
+    }
+    if (candidatePeers.isEmpty()) {
+        candidatePeers = network_.connectedNodeIds();
+    }
+    if (candidatePeers.isEmpty()) {
+        if (error) *error = "No online peers holding a replica of this file are currently reachable.";
+        return false;
+    }
+
+    const QString sourceNode = candidatePeers.first();
+    requestPullFromNode(f, sourceNode, QString(), true);
+    if (waitingForRemotePullOut) *waitingForRemotePullOut = true;
+    emit logLine(QString("Fetching '%1' from peer %2 for in-app text editor...").arg(f.name, sourceNode.left(8)));
+    return true;
+}
+
+bool PandoraController::updateTextFileContent(const QString& fileId, const QByteArray& newUtf8Content, QString* error) {
+    if (!active_) {
+        if (error) *error = "Pandora is not active.";
+        return false;
+    }
+    if (isShuttingDown()) {
+        if (error) *error = "Pandora is shutting down; edits are disabled.";
+        return false;
+    }
+
+    bool found = false;
+    FileInfo f = metadata_.file(fileId, &found);
+    if (!found || f.tombstone) {
+        if (error) *error = "File no longer exists in Pandora.";
+        return false;
+    }
+
+    // Cancel any in-flight pushes for the previous version of this file
+    const auto pushKeys = activePushes_.keys();
+    for (const QString& k : pushKeys) {
+        if (k.startsWith(fileId + ":")) {
+            activePushes_.remove(k);
+        }
+    }
+
+    QString newSha256;
+    qint64 newSize = 0;
+    if (!storage_.storeBytes(newUtf8Content, fileId, &newSha256, &newSize, error)) {
+        return false;
+    }
+
+    const QString myId = localNodeIdString();
+    QStringList previousReplicas = f.replicas;
+
+    f.size = newSize;
+    f.sha256 = newSha256;
+    ++f.version;
+    f.modifiedBy = localNodeId_;
+    f.modifiedAt = QDateTime::currentDateTimeUtc();
+    f.replicas = {myId};
+    f.versionVector[myId] = f.versionVector.value(myId, 0) + 1;
+
+    if (!metadata_.updateFile(f, error)) {
+        return false;
+    }
+
+    // Re-fetch updated FileInfo (with merged versionVector)
+    f = metadata_.file(fileId);
+    publish(EventType::FileUpdated, {{"file", f.toJson()}});
+    emit logLine(QString("Saved edits to '%1' (v%2, %3 bytes, SHA-256: %4...). Syncing across peers...")
+                 .arg(f.name).arg(f.version).arg(f.size).arg(f.sha256.left(12)));
+
+    // Push updated replica to all previous replica holders that are online, plus any additional needed to meet replicationFactor
+    QSet<QString> targetNodes;
+    for (const QString& peerId : previousReplicas) {
+        if (peerId != myId && network_.isNodeConnected(peerId)) {
+            targetNodes.insert(peerId);
+        }
+    }
+    const int desiredTotal = qMax(1, metadata_.session().replicationFactor);
+    const int additionalNeeded = desiredTotal - 1 - targetNodes.size();
+    if (additionalNeeded > 0) {
+        QStringList exclude = targetNodes.values();
+        exclude.append(myId);
+        for (const QString& extra : chooseReplicas(additionalNeeded, f.size, exclude)) {
+            targetNodes.insert(extra);
+        }
+    }
+    for (const QString& targetId : targetNodes) {
+        pushReplicaToNode(f, targetId, "Sync Edit");
+    }
+    return true;
+}
+
 bool PandoraController::initiateGuardianShutdown(int countdownSeconds, QString* error) {
     if (!active_) {
         if (error) *error = "Pandora is not active.";
@@ -648,11 +881,14 @@ void PandoraController::sendNextPushChunk(const QString& transferKey) {
     }
 }
 
-void PandoraController::requestPullFromNode(const FileInfo& f, const QString& sourceNodeId, const QString& exportDest) {
+void PandoraController::requestPullFromNode(const FileInfo& f, const QString& sourceNodeId, const QString& exportDest, bool forEditorView, bool forMediaView) {
     const QString fileId = f.id.toString(QUuid::WithoutBraces);
     QString err;
     if (!storage_.beginChunkedWrite(fileId, f.size, &err)) {
         emit logLine("Could not allocate local staging space for download: " + err);
+        if (forEditorView || forMediaView) {
+            emit fileContentFetchFailed(fileId, err);
+        }
         return;
     }
 
@@ -662,6 +898,8 @@ void PandoraController::requestPullFromNode(const FileInfo& f, const QString& so
     pull.fileName = f.name;
     pull.sourceNodeId = sourceNodeId;
     pull.exportDestination = exportDest;
+    pull.forEditorView = forEditorView;
+    pull.forMediaView = forMediaView;
     pull.fileSize = f.size;
     pull.sha256 = f.sha256;
     pull.nextOffset = 0;
@@ -1071,9 +1309,11 @@ void PandoraController::onMessage(const QJsonObject& m, const QString& peerNodeI
 
         QString err;
         if (!storage_.writeChunk(fileId, offset, chunk, &err)) {
+            const bool forViewer = pull.forEditorView || pull.forMediaView;
             storage_.abortChunkedWrite(fileId);
             activePulls_.remove(fileId);
             emit logLine("Remote download write failed: " + err);
+            if (forViewer) emit fileContentFetchFailed(fileId, err);
             return;
         }
 
@@ -1084,7 +1324,7 @@ void PandoraController::onMessage(const QJsonObject& m, const QString& peerNodeI
         tp.fileId = pull.fileId;
         tp.fileName = pull.fileName;
         tp.peerNodeId = peerNodeId;
-        tp.direction = "Download";
+        tp.direction = pull.forMediaView ? "Media Stream" : (pull.forEditorView ? "Editor Load" : "Download");
         tp.bytesTransferred = pull.nextOffset;
         tp.totalBytes = pull.fileSize;
         tp.completed = eof;
@@ -1099,9 +1339,12 @@ void PandoraController::onMessage(const QJsonObject& m, const QString& peerNodeI
                 {"maxBytes", QString::number(kTransferChunkBytes)}
             });
         } else {
+            const bool forEditor = pull.forEditorView;
+            const bool forMedia = pull.forMediaView;
             if (!storage_.finalizeChunkedWrite(fileId, pull.sha256, &err)) {
                 activePulls_.remove(fileId);
                 emit logLine("Downloaded file failed SHA-256 integrity check: " + err);
+                if (forEditor || forMedia) emit fileContentFetchFailed(fileId, err);
                 return;
             }
             const QString dest = pull.exportDestination;
@@ -1115,6 +1358,20 @@ void PandoraController::onMessage(const QJsonObject& m, const QString& peerNodeI
                 {"replicaNodeId", localNodeIdString()},
                 {"hasReplica", true}
             });
+
+            if (forEditor) {
+                bool readOk = false;
+                QString readErr;
+                const QByteArray bytes = storage_.readAllBytes(fileId, &readOk, &readErr);
+                if (readOk) {
+                    emit fileContentReady(fileId, bytes);
+                } else {
+                    emit fileContentFetchFailed(fileId, readErr);
+                }
+            }
+            if (forMedia) {
+                emit fileReplicaReadyForViewing(fileId, storage_.pathFor(fileId));
+            }
 
             if (!dest.isEmpty()) {
                 if (storage_.exportFile(fileId, dest, &err)) {
@@ -1139,11 +1396,15 @@ void PandoraController::onMessage(const QJsonObject& m, const QString& peerNodeI
         for (const QString& altPeer : f.replicas) {
             if (altPeer != localNodeIdString() && altPeer != peerNodeId && network_.isNodeConnected(altPeer)) {
                 emit logLine(QString("Falling back to replica peer %1 for '%2'...").arg(altPeer.left(8), f.name));
-                requestPullFromNode(f, altPeer, failedPull.exportDestination);
+                requestPullFromNode(f, altPeer, failedPull.exportDestination, failedPull.forEditorView, failedPull.forMediaView);
                 return;
             }
         }
-        emit logLine(QString("Remote download failed for '%1': %2").arg(failedPull.fileName, m.value("reason").toString()));
+        const QString reason = m.value("reason").toString("Remote peer failed to serve replica.");
+        emit logLine(QString("Remote download failed for '%1': %2").arg(failedPull.fileName, reason));
+        if (failedPull.forEditorView || failedPull.forMediaView) {
+            emit fileContentFetchFailed(fileId, reason);
+        }
         return;
     }
 }
@@ -1204,11 +1465,16 @@ void PandoraController::onPeerDisconnected(const QString& nodeId) {
             const auto pull = activePulls_.take(fileId);
             storage_.abortChunkedWrite(fileId);
             const FileInfo f = metadata_.file(fileId);
+            bool rerouted = false;
             for (const QString& altPeer : f.replicas) {
                 if (altPeer != localNodeIdString() && altPeer != nodeId && network_.isNodeConnected(altPeer)) {
-                    requestPullFromNode(f, altPeer, pull.exportDestination);
+                    requestPullFromNode(f, altPeer, pull.exportDestination, pull.forEditorView, pull.forMediaView);
+                    rerouted = true;
                     break;
                 }
+            }
+            if (!rerouted && (pull.forEditorView || pull.forMediaView)) {
+                emit fileContentFetchFailed(fileId, "Source peer disconnected while loading file content.");
             }
         }
     }
@@ -1246,7 +1512,15 @@ void PandoraController::onEvent(const PandoraEvent& e) {
     case EventType::FileAdded:
     case EventType::FileUpdated: {
         const FileInfo f = FileInfo::fromJson(e.payload.value("file").toObject());
+        const QString fid = f.id.toString(QUuid::WithoutBraces);
         metadata_.applyRemoteFile(f);
+        // If we held an older replica of this file that no longer matches the new SHA-256, remove stale local blob
+        // and let push/self-healing replace it with the updated version
+        const FileInfo current = metadata_.file(fid);
+        if (!current.tombstone && storage_.hasReplica(fid) && !storage_.verifyReplica(fid, current.sha256, current.size)) {
+            storage_.removeFile(fid, false);
+        }
+        triggerReplicaAuditAndRepair();
         break;
     }
     case EventType::FileDeleted: {
